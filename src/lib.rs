@@ -122,6 +122,14 @@ where
                 .body()
                 .map_err(|e| format!("failed to get request body: {e:?}"))?;
 
+            // Hand the request to the host before writing the body. The host only
+            // starts draining the body stream once `handle` has been called, and
+            // wasmtime buffers just two writes until then, so a body written
+            // first blocks forever on its second 4 KiB chunk.
+            let request_options = types::RequestOptions::new();
+            let future_response = outgoing_handler::handle(wasi_request, Some(request_options))
+                .map_err(|e| format!("failed to initiate HTTP request: {e:?}"))?;
+
             let output_stream = outgoing_body
                 .write()
                 .map_err(|e| format!("failed to get body output stream: {e:?}"))?;
@@ -135,10 +143,6 @@ where
             drop(output_stream);
             types::OutgoingBody::finish(outgoing_body, None)
                 .map_err(|e| format!("failed to finish request body: {e:?}"))?;
-
-            let request_options = types::RequestOptions::new();
-            let future_response = outgoing_handler::handle(wasi_request, Some(request_options))
-                .map_err(|e| format!("failed to initiate HTTP request: {e:?}"))?;
 
             future_response.subscribe().block();
 
